@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATC Master - AI Advisor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+    <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    
+    <style>
+        body { background-color: #f0f4f8; font-family: 'Segoe UI', Tahoma, sans-serif; }
+        .header-box { background-color: #1a365d; color: white; padding: 20px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .upload-area { border: 2px dashed #cbd5e1; background-color: #f8fafc; padding: 30px; text-align: center; border-radius: 12px; cursor: pointer; transition: 0.3s; }
+        .upload-area:hover { background-color: #e2e8f0; }
+        .result-box { background: #fff; padding: 25px; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); display: none; margin-top: 20px;}
+        
+        .chat-container { background: #fff; border-radius: 12px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); height: 60vh; display: flex; flex-direction: column; }
+        .chat-history { flex-grow: 1; overflow-y: auto; padding: 20px; background-color: #f8fafc; border-radius: 12px 12px 0 0; }
+        .chat-input-area { padding: 15px; border-top: 1px solid #e2e8f0; background: #fff; border-radius: 0 0 12px 12px; }
+        .msg-bubble { max-width: 85%; padding: 12px 16px; border-radius: 15px; margin-bottom: 15px; line-height: 1.5; font-size: 0.95rem; }
+        .msg-user { background: #2b6cb0; color: white; float: right; border-bottom-right-radius: 2px; }
+        .msg-ai { background: #e2e8f0; color: #1a202c; float: left; border-bottom-left-radius: 2px; }
+        .clearfix::after { content: ""; clear: both; display: table; }
+        
+        /* ATC Strip */
+        .atc-strip-container { max-height: 300px; overflow-y: auto; background: #e2e8f0; padding: 10px; border-radius: 8px; transition: 0.3s; }
+        .atc-strip { display: flex; background-color: #fdfdfd; border: 1px solid #a0aec0; margin-bottom: 8px; font-family: 'Courier New', Courier, monospace; font-size: 0.85rem; cursor: pointer; box-shadow: 2px 2px 4px rgba(0,0,0,0.1); transition: 0.2s; }
+        .atc-strip:hover { background-color: #ebf8ff; transform: translateX(5px); }
+        .strip-col-1 { width: 15%; border-right: 1px solid #cbd5e1; padding: 8px; font-weight: bold; text-align: center; background: #edf2f7; }
+        .strip-col-2 { width: 65%; border-right: 1px solid #cbd5e1; padding: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .strip-col-3 { width: 20%; padding: 8px; text-align: center; font-weight: bold; }
+
+        @media print {
+            body * { visibility: hidden; }
+            #resultArea, #resultArea * { visibility: visible; }
+            #resultArea { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none; padding: 0; }
+            .d-print-none, .no-export { display: none !important; }
+            .question-container { page-break-inside: avoid; margin-bottom: 20px; }
+        }
+
+        /* Infographic */
+        .ig-template { font-family: 'Sarabun', sans-serif; width: 600px; background: #ffffff; padding: 30px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.1); }
+        .ig-header { background: linear-gradient(135deg, #1a365d, #2b6cb0); color: white; padding: 20px; border-radius: 12px; text-align: center; margin-bottom: 20px; }
+        .ig-header h3 { margin: 0; font-weight: 700; font-size: 22px; }
+        .ig-badge { background: #e2e8f0; color: #2d3748; padding: 5px 15px; border-radius: 15px; font-weight: bold; font-size: 14px; display: inline-block; margin-bottom: 15px; }
+        .ig-q { font-size: 18px; font-weight: 600; color: #1a202c; margin-bottom: 20px; }
+        .ig-a { background: #f0fff4; border-left: 5px solid #38a169; padding: 15px; border-radius: 0 10px 10px 0; margin-bottom: 20px; }
+        .ig-a-label { color: #2f855a; font-size: 12px; font-weight: bold; margin-bottom: 5px; }
+        .ig-a-text { color: #22543d; font-size: 20px; font-weight: 700; }
+        .ig-e { background: #ebf8ff; padding: 15px; border-radius: 10px; border: 1px solid #bee3f8; color: #2c5282; font-size: 15px; margin-bottom: 20px; line-height: 1.6; }
+        .ig-footer { border-top: 1px dashed #cbd5e1; padding-top: 15px; font-size: 12px; color: #718096; }
+    </style>
+</head>
+<body>
+
+    <div class="header-box text-center mb-3 position-relative">
+        <h2 class="mb-1"><i class="bi bi-radar"></i> ATC Master</h2>
+        <div class="position-absolute top-0 end-0 m-3 text-end" style="font-size: 0.85rem;">
+            <div class="bg-dark bg-opacity-25 rounded px-2 py-2 mb-1 shadow-sm border border-secondary text-start" style="line-height: 1.2;">
+                <i class="bi bi-cpu"></i> <b>การใช้ทรัพยากร (Usage):</b><br>
+                <span id="tokenCounter" class="text-warning">0 Tokens <br><small class="text-success">(ประมาณ $0.000 / 0.00 ฿)</small></span>
+            </div>
+            <a href="https://platform.openai.com/usage" target="_blank" class="text-light text-decoration-none bg-danger bg-opacity-75 rounded px-2 py-1 shadow-sm d-inline-block hover-opacity">
+                <i class="bi bi-wallet2"></i> เช็กยอดคงเหลือ
+            </a>
+        </div>
+        <button id="wakeBtn" class="btn btn-warning btn-sm mt-3" onclick="wakeUpServer()">ปลุกระบบ</button>
+        <div id="wakeStatus" class="mt-2 small text-warning"></div>
+    </div>
+
+    <div class="container" style="max-width: 800px;">
+        <div class="row mb-4">
+            <div class="col-md-6 mb-2">
+                <label class="form-label fw-bold text-primary"><i class="bi bi-folder-fill"></i> เลือกหมวดหมู่เอกสาร:</label>
+                <select id="categorySelect" class="form-select border-primary">
+                    <option value="ALL">🌟 ค้นหาทั้งหมดทุกหมวดหมู่</option>
+                </select>
+            </div>
+            <div class="col-md-6 mb-2">
+                <label class="form-label fw-bold text-success"><i class="bi bi-robot"></i> เลือกระดับความฉลาด AI:</label>
+                <select id="modelSelect" class="form-select border-success">
+                    <option value="gpt-4o-mini" selected>⚡ GPT-4o-Mini (Eco - รวดเร็ว ประหยัดงบ)</option>
+                    <option value="gpt-4o">🧠 GPT-4o (Premium - แม่นยำสูงสุด วิเคราะห์ลึก)</option>
+                </select>
+            </div>
+        </div>
+
+        <ul class="nav nav-tabs mb-4 justify-content-center" id="myTab" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#chat-pane">ปรึกษาอาจารย์</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#exam-pane">ระบบเฉลยข้อสอบ</button></li>
+        </ul>
+
+        <div class="tab-content">
+            <!-- แท็บ Chat -->
+            <div class="tab-pane fade show active" id="chat-pane">
+                <div class="chat-container">
+                    <div class="chat-history" id="chatBox"></div>
+                    <div class="chat-input-area">
+                        <div class="input-group">
+                            <input type="text" id="chatInput" class="form-control" placeholder="พิมพ์คำถาม..." onkeypress="if(event.key === 'Enter') sendChat()">
+                            <button class="btn btn-primary" onclick="sendChat()">ส่ง</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- แท็บ Exam -->
+            <div class="tab-pane fade" id="exam-pane">
+                <div class="card shadow-sm border-0 mb-4">
+                    <div class="card-body p-4">
+                        <div class="upload-area" onclick="document.getElementById('examFile').click()">
+                            <i class="bi bi-images text-primary" style="font-size: 3rem;"></i>
+                            <h5 class="mt-2 text-dark">อัปโหลดไฟล์ข้อสอบ (PDF, Word, ภาพ)</h5>
+                            <input type="file" id="examFile" multiple style="display:none;" accept=".pdf,.doc,.docx,image/*" onchange="handleFileSelect(event)">
+                            <div id="fileNameDisplay" class="mt-2 fw-bold text-success"></div>
+                        </div>
+                        <div class="d-flex gap-2 mt-3">
+                            <button id="solveBtn" class="btn btn-success btn-lg w-75 shadow-sm" onclick="startExamProcessing()" disabled>เริ่มเฉลยข้อสอบ</button>
+                            <button id="pauseBtn" class="btn btn-warning btn-lg w-25 shadow-sm" onclick="togglePause()" style="display: none;"><i class="bi bi-pause-fill"></i> พัก</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="loading" class="text-center my-4" style="display: none;">
+                    <div class="spinner-border text-primary" style="width: 3rem; height: 3rem;"></div>
+                    <h5 class="mt-3 text-secondary" id="loadingText">AI กำลังวิเคราะห์...</h5>
+                </div>
+
+                <!-- ATC Strip Dashboard -->
+                <div id="stripDashboard" style="display:none;">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="text-primary fw-bold mb-0"><i class="bi bi-list-task"></i> ATC Strip History</h6>
+                        <button class="btn btn-sm btn-outline-secondary" onclick="toggleStrip()"><i class="bi bi-eye-slash"></i> ซ่อน / แสดง</button>
+                    </div>
+                    <div id="stripHistory" class="atc-strip-container mb-4"></div>
+                </div>
+
+                <!-- ผลลัพธ์ -->
+                <div id="resultArea" class="result-box mb-5">
+                    <div id="pdfContent"></div>
+                    <div class="d-flex gap-2 mt-4 d-print-none">
+                        <button class="btn btn-primary w-50" onclick="downloadWordClean()"><i class="bi bi-file-word-fill"></i> ดาวน์โหลด Word</button>
+                        <button class="btn btn-danger w-50" onclick="window.print()"><i class="bi bi-file-pdf-fill"></i> ดาวน์โหลด PDF</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Infographic -->
+    <div class="modal fade" id="infoModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content border-0 bg-transparent">
+                <div class="modal-body text-center bg-light rounded-4 p-4 position-relative">
+                    <button type="button" class="btn-close position-absolute top-0 end-0 m-3" data-bs-dismiss="modal"></button>
+                    <h5 class="text-primary mb-3"><i class="bi bi-magic"></i> AI Knowledge Card</h5>
+                    <div style="position: absolute; top: -9999px; left: -9999px;">
+                        <div id="igCanvas" class="ig-template">
+                            <div class="ig-header"><h3>✈️ ATC KNOWLEDGE</h3><div style="font-size:12px; color:#90cdf4;">ATC Master - AI Smart Solution</div></div>
+                            <div class="ig-badge" id="ig-qnum">📌 ข้อที่ X</div>
+                            <div class="ig-q" id="ig-qtext">คำถาม</div>
+                            <div class="ig-a">
+                                <div class="ig-a-label">🎯 CORRECT ANSWER</div>
+                                <div class="ig-a-text" id="ig-atext">คำตอบ</div>
+                            </div>
+                            <div class="ig-e" id="ig-etext">อธิบาย</div>
+                            <div class="ig-footer" id="ig-ref">อ้างอิง</div>
+                        </div>
+                    </div>
+                    <div id="igImageContainer"><div class="spinner-border text-primary my-4"></div><p>กำลังเรนเดอร์ภาพ...</p></div>
+                    <p class="text-muted small mt-3"><i class="bi bi-phone"></i> มือถือสามารถ <b>"กดค้างที่รูป"</b> แล้วบันทึกได้เลย</p>
+                    <button class="btn btn-success mt-2" id="downloadImgBtn" style="display:none;"><i class="bi bi-download"></i> บันทึกลงคอมพิวเตอร์</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        const BASE_URL = "https://atc-master-backend.onrender.com"; 
+        let totalTokensDisplay = 0; 
+        let totalCostUSD = 0;
+        let selectedFiles = []; 
+        let isPaused = false; 
+
+        const PRICING = {
+            "gpt-4o": { input: 5.00, output: 15.00 },
+            "gpt-4o-mini": { input: 0.15, output: 0.60 }
+        };
+        const THB_RATE = 36.5;
+
+        function updateTokens(tokensObj, modelName) { 
+            if(tokensObj && tokensObj.input !== undefined) { 
+                let inTokens = tokensObj.input;
+                let outTokens = tokensObj.output;
+                totalTokensDisplay += (inTokens + outTokens);
+                
+                let modelRates = PRICING[modelName] || PRICING["gpt-4o-mini"];
+                let costInput = (inTokens / 1000000) * modelRates.input;
+                let costOutput = (outTokens / 1000000) * modelRates.output;
+                totalCostUSD += (costInput + costOutput);
+                
+                let costTHB = totalCostUSD * THB_RATE;
+                document.getElementById('tokenCounter').innerHTML = 
+                    `${totalTokensDisplay.toLocaleString()} Tokens <br> 
+                     <small class="text-success">(ประมาณ $${totalCostUSD.toFixed(4)} / ${costTHB.toFixed(2)} ฿)</small>`;
+            } 
+        }
+
+        async function wakeUpServer() {
+            document.getElementById('wakeBtn').style.display = 'none';
+            document.getElementById('wakeStatus').innerText = "กำลังปลุก Server...";
+            try {
+                await fetch(BASE_URL + "/health");
+                document.getElementById('wakeStatus').innerText = "✅ พร้อมทำงาน";
+                document.getElementById('wakeStatus').className = "mt-2 small text-success fw-bold";
+                const res = await fetch(BASE_URL + "/categories");
+                const data = await res.json();
+                data.categories.forEach(c => {
+                    let opt = document.createElement("option"); opt.value = c; opt.text = "📂 " + c;
+                    document.getElementById('categorySelect').appendChild(opt);
+                });
+            } catch(e) {
+                document.getElementById('wakeStatus').innerText = "❌ ล้มเหลว โปรดรีเฟรช";
+                document.getElementById('wakeStatus').className = "mt-2 small text-danger";
+            }
+        }
+
+        async function sendChat() {
+            const text = document.getElementById('chatInput').value.trim();
+            if (!text) return;
+            
+            const chatBox = document.getElementById('chatBox');
+            chatBox.innerHTML += `<div class="msg-bubble msg-user">${text}</div><div class="clearfix"></div>`;
+            document.getElementById('chatInput').value = "";
+            
+            const thinkingId = "thinking-" + Date.now();
+            chatBox.innerHTML += `<div id="${thinkingId}" class="msg-bubble msg-ai text-muted"><div class="spinner-border spinner-border-sm"></div> กำลังคิด...</div><div class="clearfix"></div>`;
+            chatBox.scrollTop = chatBox.scrollHeight;
+            
+            try {
+                const res = await fetch(BASE_URL + "/chat", { 
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+                    body: JSON.stringify({ message: text, category: document.getElementById('categorySelect').value, model: document.getElementById('modelSelect').value }) 
+                });
+                const data = await res.json();
+                if(document.getElementById(thinkingId)) document.getElementById(thinkingId).remove(); 
+                
+                if (data.status === "success") {
+                    chatBox.innerHTML += `<div class="msg-bubble msg-ai"><b>AI:</b><br>${data.answer.replace(/\n/g, '<br>')}</div><div class="clearfix"></div>`;
+                    updateTokens(data.tokens, document.getElementById('modelSelect').value);
+                } else {
+                    chatBox.innerHTML += `<div class="msg-bubble msg-ai text-danger"><b>❌ เกิดข้อผิดพลาด:</b><br>${data.message}</div><div class="clearfix"></div>`;
+                }
+            } catch (error) { 
+                if(document.getElementById(thinkingId)) document.getElementById(thinkingId).innerHTML = "❌ ขาดการเชื่อมต่อกับเซิร์ฟเวอร์"; 
+            }
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        function handleFileSelect(event) {
+            selectedFiles = event.target.files;
+            if (selectedFiles.length > 0) {
+                document.getElementById('fileNameDisplay').innerText = selectedFiles.length === 1 ? `📄 ${selectedFiles[0].name}` : `📸 เลือก ${selectedFiles.length} ไฟล์`;
+                document.getElementById('solveBtn').disabled = false;
+            }
+        }
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const pauseBtn = document.getElementById('pauseBtn');
+            if(isPaused) {
+                pauseBtn.innerHTML = '<i class="bi bi-play-fill"></i> ทำต่อ';
+                pauseBtn.className = "btn btn-info btn-lg w-25 shadow-sm text-white";
+                document.getElementById('loadingText').innerText = "⏸️ หยุดพักชั่วคราว";
+            } else {
+                pauseBtn.innerHTML = '<i class="bi bi-pause-fill"></i> พัก';
+                pauseBtn.className = "btn btn-warning btn-lg w-25 shadow-sm";
+                document.getElementById('loadingText').innerText = "กำลังทยอยเฉลย...";
+            }
+        }
+
+        function toggleStrip() {
+            const h = document.getElementById('stripHistory');
+            h.style.display = h.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function addATCStrip(qId, text, scoreStr) {
+            document.getElementById('stripDashboard').style.display = 'block';
+            const history = document.getElementById('stripHistory');
+            let score = parseInt(scoreStr.match(/\d+/)) || 0;
+            let color = "#e53e3e"; let icon = "❌"; 
+            if(score >= 90) { color = "#38a169"; icon = "✅"; } 
+            else if(score >= 50) { color = "#3182ce"; icon = "🧠"; } 
+            else if(score > 0) { color = "#d69e2e"; icon = "⚠️"; } 
+            const shortText = text.length > 40 ? text.substring(0, 40) + "..." : text;
+            const html = `<div class="atc-strip" style="border-left: 8px solid ${color};" onclick="document.getElementById('${qId}').scrollIntoView({behavior: 'smooth'})"><div class="strip-col-1">${qId.replace('q-','ข้อ ')}</div><div class="strip-col-2">${shortText}</div><div class="strip-col-3" style="color:${color}">${score}% ${icon}</div></div>`;
+            history.insertAdjacentHTML('beforeend', html);
+            history.scrollTop = history.scrollHeight;
+        }
+
+        async function startExamProcessing() {
+            if (selectedFiles.length === 0) return;
+            document.getElementById('solveBtn').disabled = true;
+            document.getElementById('pauseBtn').style.display = 'block';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('resultArea').style.display = 'block';
+            document.getElementById('pdfContent').innerHTML = ""; 
+            document.getElementById('stripHistory').innerHTML = ""; 
+            
+            const formData = new FormData();
+            for (let i = 0; i < selectedFiles.length; i++) { formData.append("files", selectedFiles[i]); }
+
+            try {
+                document.getElementById('loadingText').innerText = "🧠 AI กำลังอ่านเลขข้อสอบและเรียงลำดับให้เป๊ะ 100%...";
+                const uploadRes = await fetch(BASE_URL + "/upload_exam", { method: 'POST', body: formData });
+                const uploadData = await uploadRes.json();
+                
+                if(uploadData.status === "success") {
+                    let currentModel = document.getElementById('modelSelect').value;
+                    for(let i = 0; i < uploadData.total_chunks; i++) {
+                        while(isPaused) { await new Promise(resolve => setTimeout(resolve, 500)); }
+                        document.getElementById('loadingText').innerText = `กำลังทยอยเฉลยทีละข้อ... (ข้อที่ ${i+1} / ${uploadData.total_chunks})`;
+                        
+                        const solveRes = await fetch(BASE_URL + "/solve_chunk", { 
+                            method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+                            body: JSON.stringify({ session_id: uploadData.session_id, chunk_index: i, category: document.getElementById('categorySelect').value, model: currentModel }) 
+                        });
+                        const solveData = await solveRes.json();
+                        
+                        if(solveData.status === "success") {
+                            const tempDiv = document.createElement('div'); tempDiv.innerHTML = solveData.answer;
+                            document.getElementById('pdfContent').appendChild(tempDiv);
+                            const scripts = tempDiv.getElementsByTagName('script');
+                            for(let s of scripts) { 
+                                try { eval(s.innerText); } 
+                                catch(e) { console.warn("AI Script format issue:", e); }
+                            }
+                            updateTokens(solveData.tokens, currentModel);
+                        }
+                    }
+                    document.getElementById('loadingText').innerText = "✅ เสร็จสมบูรณ์ทุกข้อ";
+                    document.getElementById('pauseBtn').style.display = 'none';
+                }
+            } catch (error) { alert("เกิดข้อผิดพลาด: " + error); }
+            setTimeout(() => { document.getElementById('loading').style.display = 'none'; }, 2000);
+            document.getElementById('solveBtn').disabled = false;
+        }
+
+        function requestInfographic(btn) {
+            const container = btn.closest('.question-container');
+            const qNum = container.querySelector('.q-num').innerText;
+            const qText = container.querySelector('.q-text').innerText.replace('📝 คำถาม:', '').trim();
+            const aText = container.querySelector('.a-text').innerText.replace('🎯 คำตอบที่ถูกต้อง:', '').trim();
+            const eText = container.querySelector('.e-text').innerHTML.replace('<b>💡 อธิบาย:</b>', '').trim();
+            const cText = container.querySelector('.c-text').innerText.replace('📊 ความน่าเชื่อถือ:', '').trim();
+            const refText = container.querySelector('.ref-text').parentElement.innerText.replace('📚 แหล่งอ้างอิง:', '').trim();
+
+            document.getElementById('ig-qnum').innerText = qNum;
+            document.getElementById('ig-qtext').innerHTML = qText.replace(/\n/g, '<br>');
+            document.getElementById('ig-atext').innerHTML = aText;
+            document.getElementById('ig-etext').innerHTML = `<b>อธิบาย:</b><br>${eText}`;
+            document.getElementById('ig-ref').innerHTML = `<b>อ้างอิง:</b> ${refText} <br><b>ความน่าเชื่อถือ:</b> ${cText}`;
+
+            new bootstrap.Modal(document.getElementById('infoModal')).show();
+            document.getElementById('igImageContainer').innerHTML = '<div class="spinner-border text-primary my-4"></div><p>กำลังเรนเดอร์ภาพ...</p>';
+            document.getElementById('downloadImgBtn').style.display = 'none';
+
+            setTimeout(() => {
+                html2canvas(document.getElementById('igCanvas'), { scale: 2, backgroundColor: null }).then(canvas => {
+                    const imgData = canvas.toDataURL("image/png");
+                    document.getElementById('igImageContainer').innerHTML = `<img src="${imgData}" style="width:100%; border-radius:15px; box-shadow:0 10px 20px rgba(0,0,0,0.2);">`;
+                    const dlBtn = document.getElementById('downloadImgBtn');
+                    dlBtn.style.display = 'inline-block';
+                    dlBtn.onclick = () => {
+                        let a = document.createElement('a'); a.href = imgData; 
+                        let safeNum = qNum.replace(/[^0-9]/g, '');
+                        a.download = `ATC_Infographic_ข้อ${safeNum || 'พิเศษ'}.png`; 
+                        a.click();
+                    };
+                });
+            }, 500);
+        }
+
+        function downloadWordClean() {
+            let clone = document.getElementById('pdfContent').cloneNode(true);
+            let noExportEls = clone.querySelectorAll('.no-export');
+            noExportEls.forEach(el => el.remove());
+            
+            let cleanText = clone.innerHTML
+                .replace(/<div[^>]*>/gi, '<br><br>') .replace(/<\/div>/gi, '')
+                .replace(/<span[^>]*>/gi, '') .replace(/<\/span>/gi, '')
+                .replace(/<hr[^>]*>/gi, '<br>----------------------------------------<br>'); 
+            
+            const sourceHTML = "<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'></head><body style='font-family: Arial, sans-serif;'>" + cleanText + "</body></html>";
+            const source = 'data:application/vnd.ms-word;charset=utf-8,' + encodeURIComponent(sourceHTML);
+            const fileDownload = document.createElement("a");
+            document.body.appendChild(fileDownload);
+            fileDownload.href = source; fileDownload.download = 'ATC_Exam_Solution.doc'; fileDownload.click();
+            document.body.removeChild(fileDownload);
+        }
+    </script>
+</body>
+</html>

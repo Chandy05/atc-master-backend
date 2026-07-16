@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+pinecone-client
+openai
+python-multipart
+pydantic
+pymupdf
+docx2txt
+python-pptx
+pandas
+langchain-text-splitters
+google-genai
