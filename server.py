@@ -30,7 +30,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 class ChatRequest(BaseModel): message: str; history: List[Dict[str, str]] = []; category: str; model: str
 class SolveChunkRequest(BaseModel): session_id: str; chunk_index: int; category: str; model: str
 
-print("กำลังเตรียมความพร้อมระบบ (V.6.1 Final - No Hallucination & Black Keyword)...")
+print("กำลังเตรียมความพร้อมระบบ (V.6.2 Bring back exact Paragraph)...")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index("atc-master")
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -161,7 +161,6 @@ def solve_chunk_api(req: SolveChunkRequest):
         q_num = chunk_data.get("q_num", req.chunk_index + 1)
         chunk_text = chunk_data.get("q_text", "")
         
-        # 🌟 แยกโหมดการทำงาน
         if req.category == "ENG":
             context = "ไม่มีเอกสารอ้างอิง เนื่องจากเป็นข้อสอบวิชาภาษาอังกฤษทั่วไป"
             category_label = "ENG"
@@ -182,10 +181,10 @@ def solve_chunk_api(req: SolveChunkRequest):
             system_role = "You are a highly accurate Aviation ATC Exam Solver. You never guess, you only analyze step-by-step."
             step2_instruction = "- Step 2: วิเคราะห์ตามเอกสารอ้างอิง = \"[Explain what the provided Document Context says about this specific topic]\""
             
-            # 🌟 ล็อกคอ AI เรื่องแหล่งอ้างอิง (ห้ามมโน ต้องใช้ชื่อไฟล์)
-            source_instruction = f"MUST start with \"( {category_label} ) \". Then, you MUST write the EXACT File Name provided in the Context (Source: [Filename]). DO NOT invent Chapter/Section numbers if they are not clearly written in the context. If NOT found in Context -> Score 50-89 and write \"( {category_label} ) 🧠 ความรู้สากลออนไลน์\"."
+            # 🌟 ล็อกคอ AI เรื่องแหล่งอ้างอิง (บังคับเอาพารากราฟกลับมา แต่ห้ามมโน)
+            source_instruction = f"MUST start with \"( {category_label} ) \". You MUST write the EXACT File Name from the Context. IF the text contains a specific Chapter, Section, or Paragraph number, you MUST include it (e.g., '( OJT ) Source: doc.pdf, Chapter 3, Para 1.2'). DO NOT invent fake numbers. If NOT found in Context -> Score 50-89 and write \"( {category_label} ) 🧠 ความรู้สากลออนไลน์\"."
 
-        # 🌟 PROMPT หลัก
+        # 🌟 PROMPT หลักที่ปรับปรุง
         final_prompt = f"""[Document Context]:\n{context}\n
 [Exam Question]:\n{chunk_text}\n
 TASK: Solve the single question provided above.
@@ -212,7 +211,7 @@ Generate ONLY valid HTML (replace bracket placeholders with actual data):
     <b>- Step 3: สรุปเหตุผล =</b> "[Final Conclusion]"</p>
     <p class="c-text"><b>📊 ความน่าเชื่อถือ:</b> [INTEGER SCORE]%</p>
     <div style="background: #f8fafc; padding: 15px; border-left: 4px solid #cbd5e1; margin-top: 10px;">
-        <b class="ref-text">📚 แหล่งอ้างอิง:</b> [Source Name WITH Prefix]<br>
+        <b class="ref-text">📚 แหล่งอ้างอิง:</b> [Source Name AND Paragraph/Section if available]<br>
         <b>🔎 ข้อความต้นฉบับ:</b> "[Quote with <b><span style='color: #000000; font-weight: 900;'>ANSWER KEYWORD</span></b> highlighted]"
     </div>
     <div class="mt-3 text-end d-print-none no-export">
