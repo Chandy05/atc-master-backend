@@ -30,7 +30,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 class ChatRequest(BaseModel): message: str; history: List[Dict[str, str]] = []; category: str; model: str
 class SolveChunkRequest(BaseModel): session_id: str; chunk_index: int; category: str; model: str
 
-print("กำลังเตรียมความพร้อมระบบ (V.6 Multi-Subject + English Tutor)...")
+print("กำลังเตรียมความพร้อมระบบ (V.6.1 Final - No Hallucination & Black Keyword)...")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index("atc-master")
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -161,7 +161,7 @@ def solve_chunk_api(req: SolveChunkRequest):
         q_num = chunk_data.get("q_num", req.chunk_index + 1)
         chunk_text = chunk_data.get("q_text", "")
         
-        # 🌟 แยกโหมดการทำงาน: ถ้าเป็นวิชาภาษาอังกฤษ (ENG) ไม่ต้องไปค้น Pinecone
+        # 🌟 แยกโหมดการทำงาน
         if req.category == "ENG":
             context = "ไม่มีเอกสารอ้างอิง เนื่องจากเป็นข้อสอบวิชาภาษาอังกฤษทั่วไป"
             category_label = "ENG"
@@ -181,23 +181,25 @@ def solve_chunk_api(req: SolveChunkRequest):
             category_label = req.category if req.category != "ALL" else "ทุกหมวดหมู่"
             system_role = "You are a highly accurate Aviation ATC Exam Solver. You never guess, you only analyze step-by-step."
             step2_instruction = "- Step 2: วิเคราะห์ตามเอกสารอ้างอิง = \"[Explain what the provided Document Context says about this specific topic]\""
-            source_instruction = f"MUST start with \"( {category_label} ) \". Then, you MUST extract and write the EXACT Chapter, Section, or Paragraph number from the Context (e.g., \"( {category_label} ) Chapter 5, Section 5.6.1\"). DO NOT guess the name. If NOT found in Context -> Score 50-89 and write \"( {category_label} ) 🧠 ความรู้สากลออนไลน์\"."
+            
+            # 🌟 ล็อกคอ AI เรื่องแหล่งอ้างอิง (ห้ามมโน ต้องใช้ชื่อไฟล์)
+            source_instruction = f"MUST start with \"( {category_label} ) \". Then, you MUST write the EXACT File Name provided in the Context (Source: [Filename]). DO NOT invent Chapter/Section numbers if they are not clearly written in the context. If NOT found in Context -> Score 50-89 and write \"( {category_label} ) 🧠 ความรู้สากลออนไลน์\"."
 
-        # 🌟 PROMPT หลักที่ปรับตามหมวดวิชา
+        # 🌟 PROMPT หลัก
         final_prompt = f"""[Document Context]:\n{context}\n
 [Exam Question]:\n{chunk_text}\n
 TASK: Solve the single question provided above.
 
 CRITICAL INSTRUCTIONS (MUST OBEY):
 1. "คำถาม" and "ช้อยส์": Write exactly as given in the text.
-2. "คำตอบที่ถูกต้อง": You MUST write the full letter AND the full exact text of the correct choice (e.g., "a. 0510"). DO NOT just write "a.".
+2. "คำตอบที่ถูกต้อง": You MUST write the full letter AND the full exact text of the correct choice.
 3. "อธิบาย": ACT AS A LOGICAL ANALYST. You MUST use this exact 3-step format in Thai:
-   - Step 1: คำถามนี้ ถามว่า .... = "[Translate the English question into a clear, natural Thai question]"
+   - Step 1: คำถามนี้ ถามว่า .... = "[Translate the question to Thai. If already in Thai, just restate it clearly]"
    {step2_instruction}
    - Step 3: สรุปเหตุผล = "[Explain logically WHY the correct choice matches the rule and WHY others are wrong]"
-4. "ความน่าเชื่อถือ": MUST BE EXACTLY ONE INTEGER NUMBER between 0 and 100 (e.g., 95, 82). Do NOT write ranges.
+4. "ความน่าเชื่อถือ": MUST BE EXACTLY ONE INTEGER NUMBER between 0 and 100.
 5. "แหล่งอ้างอิง": {source_instruction}
-6. "ข้อความต้นฉบับ": Quote the relevant sentence from the Context (Or quote the grammar rule if ENG). THEN, find the exact keyword or phrase that directly proves the CORRECT ANSWER, and wrap ONLY that specific keyword/phrase in <b><span style="color: black;">[KEYWORD]</span></b>.
+6. "ข้อความต้นฉบับ": Quote the relevant sentence from the Context. THEN, you MUST find the specific keyword that proves the answer and wrap it EXACTLY in this HTML tag to make it black and bold: <b><span style="color: #000000; font-weight: 900;">[KEYWORD]</span></b>.
 
 Generate ONLY valid HTML (replace bracket placeholders with actual data):
 <div id="q-{q_num}" class="question-container" style="margin-bottom: 30px; page-break-inside: avoid; position: relative;">
@@ -205,13 +207,13 @@ Generate ONLY valid HTML (replace bracket placeholders with actual data):
     <p class="q-text"><b>📝 คำถาม:</b><br>[Question text]<br>[Choice A]<br>[Choice B]<br>[Choice C]<br>[Choice D]</p>
     <p class="a-text"><b>🎯 คำตอบที่ถูกต้อง:</b> <span style="color: #27ae60; font-weight: bold;">[Correct Answer Letter AND Full Text]</span></p>
     <p class="e-text" style="line-height: 1.8;"><b>💡 อธิบาย:</b><br>
-    <b>- Step 1: คำถามนี้ ถามว่า .... =</b> "[Translation]"<br>
+    <b>- Step 1: คำถามนี้ ถามว่า .... =</b> "[Translation/Restatement]"<br>
     <b>{step2_instruction.split('=')[0].strip()} =</b> "[Analysis]"<br>
     <b>- Step 3: สรุปเหตุผล =</b> "[Final Conclusion]"</p>
     <p class="c-text"><b>📊 ความน่าเชื่อถือ:</b> [INTEGER SCORE]%</p>
     <div style="background: #f8fafc; padding: 15px; border-left: 4px solid #cbd5e1; margin-top: 10px;">
         <b class="ref-text">📚 แหล่งอ้างอิง:</b> [Source Name WITH Prefix]<br>
-        <b>🔎 ข้อความต้นฉบับ:</b> "[Quote with <b><span style='color: black;'>ANSWER KEYWORD</span></b> highlighted]"
+        <b>🔎 ข้อความต้นฉบับ:</b> "[Quote with <b><span style='color: #000000; font-weight: 900;'>ANSWER KEYWORD</span></b> highlighted]"
     </div>
     <div class="mt-3 text-end d-print-none no-export">
         <button class="btn btn-sm btn-info text-white shadow-sm" onclick="requestInfographic(this)"><i class="bi bi-easel-fill"></i> สรุปเป็น Infographic ภาพ</button>
