@@ -209,19 +209,31 @@
             } 
         }
 
-        async function wakeUpServer() {
+async function wakeUpServer() {
             document.getElementById('wakeBtn').style.display = 'none';
             document.getElementById('wakeStatus').innerText = "กำลังปลุก Server...";
             try {
                 await fetch(BASE_URL + "/health");
                 document.getElementById('wakeStatus').innerText = "✅ พร้อมทำงาน";
                 document.getElementById('wakeStatus').className = "mt-2 small text-success fw-bold";
+                
                 const res = await fetch(BASE_URL + "/categories");
                 const data = await res.json();
+                
+                // ดึงหมวดหมู่ ATC จากฐานข้อมูลมาแสดง
                 data.categories.forEach(c => {
                     let opt = document.createElement("option"); opt.value = c; opt.text = "📂 " + c;
                     document.getElementById('categorySelect').appendChild(opt);
                 });
+                
+                // 🌟 เพิ่มตัวเลือก "วิชาภาษาอังกฤษ" แบบล็อกตายตัวไว้ต่อท้ายเสมอ
+                let engOpt = document.createElement("option"); 
+                engOpt.value = "ENG"; 
+                engOpt.text = "🇬🇧 วิชาภาษาอังกฤษ (Grammar/TOEIC)";
+                engOpt.style.fontWeight = "bold";
+                engOpt.style.color = "#d97706";
+                document.getElementById('categorySelect').appendChild(engOpt);
+                
             } catch(e) {
                 document.getElementById('wakeStatus').innerText = "❌ ล้มเหลว โปรดรีเฟรช";
                 document.getElementById('wakeStatus').className = "mt-2 small text-danger";

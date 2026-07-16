@@ -12,12 +12,11 @@ from openai import OpenAI
 # 🔑 ตั้งค่า API KEY
 PINECONE_API_KEY = "xxx"
 OPENAI_API_KEY = "xxx"
-
 INDEX_NAME = "atc-master"
 PDF_FOLDER_PATH = r"D:\01 Project\Atc_Essential"
 
 # 🌟 สวิตช์เปิด-ปิด โหมดอ่านภาพสแกน (OCR)
-ENABLE_AI_OCR = True
+ENABLE_AI_OCR = False
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 

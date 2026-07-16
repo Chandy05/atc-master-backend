@@ -23,13 +23,14 @@ from openai import OpenAI
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "ใส่ Key เดิมสำรองไว้เผื่อรันในเครื่อง")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "ใส่ Key เดิมสำรองไว้เผื่อรันในเครื่อง")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "ใส่ Key เดิมสำรองไว้เผื่อรันในเครื่อง")
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 class ChatRequest(BaseModel): message: str; history: List[Dict[str, str]] = []; category: str; model: str
 class SolveChunkRequest(BaseModel): session_id: str; chunk_index: int; category: str; model: str
 
-print("กำลังเตรียมความพร้อมระบบ (V.5 CoT Translation & Category Tag)...")
+print("กำลังเตรียมความพร้อมระบบ (V.6 Multi-Subject + English Tutor)...")
 pc = Pinecone(api_key=PINECONE_API_KEY)
 index = pc.Index("atc-master")
 client = OpenAI(api_key=OPENAI_API_KEY)
@@ -160,17 +161,30 @@ def solve_chunk_api(req: SolveChunkRequest):
         q_num = chunk_data.get("q_num", req.chunk_index + 1)
         chunk_text = chunk_data.get("q_text", "")
         
-        kw_prompt = f"Extract only technical codes, acronyms, or specific nouns from this single question. DO NOT add any new words. If none, return nothing.\n\nText: {chunk_text}"
-        kw_res = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": kw_prompt}], max_tokens=30)
-        exact_keywords = kw_res.choices[0].message.content.strip()
-        
-        context = get_context_from_db(chunk_text, exact_keywords, req.category, top_k=20)
-        
-        # 🌟 กำหนดป้ายชื่อหมวดหมู่ (ถ้าระบุ ALL ให้พิมพ์ว่า "ทุกหมวดหมู่")
-        category_label = req.category if req.category != "ALL" else "ทุกหมวดหมู่"
-        
-        # 🌟 NEW PROMPT: 3-Step Translation CoT + Category Tagging
-        final_prompt = f"""[Document Context from Pinecone Database]:\n{context}\n
+        # 🌟 แยกโหมดการทำงาน: ถ้าเป็นวิชาภาษาอังกฤษ (ENG) ไม่ต้องไปค้น Pinecone
+        if req.category == "ENG":
+            context = "ไม่มีเอกสารอ้างอิง เนื่องจากเป็นข้อสอบวิชาภาษาอังกฤษทั่วไป"
+            category_label = "ENG"
+            system_role = "คุณคือสุดยอดอาจารย์สอนภาษาอังกฤษ (English Tutor) ผู้เชี่ยวชาญด้านไวยากรณ์ คำศัพท์ และข้อสอบ TOEIC"
+            step2_instruction = "- Step 2: วิเคราะห์หลักไวยากรณ์/คำศัพท์ = \"[Explain the grammar rules, vocabulary meaning, or syntax structure related to the question]\""
+            source_instruction = "MUST write \"( ENG ) 🧠 หลักไวยากรณ์ภาษาอังกฤษสากล\"."
+            kw_tokens = 0
+            
+        else:
+            # โหมด ATC ปกติ
+            kw_prompt = f"Extract only technical codes, acronyms, or specific nouns from this single question. DO NOT add any new words. If none, return nothing.\n\nText: {chunk_text}"
+            kw_res = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": kw_prompt}], max_tokens=30)
+            exact_keywords = kw_res.choices[0].message.content.strip()
+            kw_tokens = kw_res.usage.prompt_tokens + kw_res.usage.completion_tokens
+            
+            context = get_context_from_db(chunk_text, exact_keywords, req.category, top_k=20)
+            category_label = req.category if req.category != "ALL" else "ทุกหมวดหมู่"
+            system_role = "You are a highly accurate Aviation ATC Exam Solver. You never guess, you only analyze step-by-step."
+            step2_instruction = "- Step 2: วิเคราะห์ตามเอกสารอ้างอิง = \"[Explain what the provided Document Context says about this specific topic]\""
+            source_instruction = f"MUST start with \"( {category_label} ) \". Then, you MUST extract and write the EXACT Chapter, Section, or Paragraph number from the Context (e.g., \"( {category_label} ) Chapter 5, Section 5.6.1\"). DO NOT guess the name. If NOT found in Context -> Score 50-89 and write \"( {category_label} ) 🧠 ความรู้สากลออนไลน์\"."
+
+        # 🌟 PROMPT หลักที่ปรับตามหมวดวิชา
+        final_prompt = f"""[Document Context]:\n{context}\n
 [Exam Question]:\n{chunk_text}\n
 TASK: Solve the single question provided above.
 
@@ -179,11 +193,11 @@ CRITICAL INSTRUCTIONS (MUST OBEY):
 2. "คำตอบที่ถูกต้อง": You MUST write the full letter AND the full exact text of the correct choice (e.g., "a. 0510"). DO NOT just write "a.".
 3. "อธิบาย": ACT AS A LOGICAL ANALYST. You MUST use this exact 3-step format in Thai:
    - Step 1: คำถามนี้ ถามว่า .... = "[Translate the English question into a clear, natural Thai question]"
-   - Step 2: วิเคราะห์ตามเอกสารอ้างอิง = "[Explain what the provided Document Context says about this specific topic]"
+   {step2_instruction}
    - Step 3: สรุปเหตุผล = "[Explain logically WHY the correct choice matches the rule and WHY others are wrong]"
 4. "ความน่าเชื่อถือ": MUST BE EXACTLY ONE INTEGER NUMBER between 0 and 100 (e.g., 95, 82). Do NOT write ranges.
-5. "แหล่งอ้างอิง": MUST start with "( {category_label} ) ". Then, you MUST extract and write the EXACT Chapter, Section, or Paragraph number from the Context (e.g., "( {category_label} ) Chapter 5, Section 5.6.1, PANS-ATM"). DO NOT guess the name. If NOT found in Context -> Score 50-89 and write "( {category_label} ) 🧠 ความรู้สากลออนไลน์".
-6. "ข้อความต้นฉบับ": Quote the relevant sentence from the Context. THEN, find the exact keyword or phrase that directly proves the CORRECT ANSWER, and wrap ONLY that specific keyword/phrase in <b><span style="color: black;">[KEYWORD]</span></b>.
+5. "แหล่งอ้างอิง": {source_instruction}
+6. "ข้อความต้นฉบับ": Quote the relevant sentence from the Context (Or quote the grammar rule if ENG). THEN, find the exact keyword or phrase that directly proves the CORRECT ANSWER, and wrap ONLY that specific keyword/phrase in <b><span style="color: black;">[KEYWORD]</span></b>.
 
 Generate ONLY valid HTML (replace bracket placeholders with actual data):
 <div id="q-{q_num}" class="question-container" style="margin-bottom: 30px; page-break-inside: avoid; position: relative;">
@@ -192,7 +206,7 @@ Generate ONLY valid HTML (replace bracket placeholders with actual data):
     <p class="a-text"><b>🎯 คำตอบที่ถูกต้อง:</b> <span style="color: #27ae60; font-weight: bold;">[Correct Answer Letter AND Full Text]</span></p>
     <p class="e-text" style="line-height: 1.8;"><b>💡 อธิบาย:</b><br>
     <b>- Step 1: คำถามนี้ ถามว่า .... =</b> "[Translation]"<br>
-    <b>- Step 2: วิเคราะห์ตามเอกสารอ้างอิง =</b> "[Context Analysis]"<br>
+    <b>{step2_instruction.split('=')[0].strip()} =</b> "[Analysis]"<br>
     <b>- Step 3: สรุปเหตุผล =</b> "[Final Conclusion]"</p>
     <p class="c-text"><b>📊 ความน่าเชื่อถือ:</b> [INTEGER SCORE]%</p>
     <div style="background: #f8fafc; padding: 15px; border-left: 4px solid #cbd5e1; margin-top: 10px;">
@@ -209,13 +223,13 @@ Generate ONLY valid HTML (replace bracket placeholders with actual data):
 
         response = client.chat.completions.create(
             model=req.model, 
-            messages=[{"role": "system", "content": "You are a highly accurate Aviation ATC Exam Solver. You never guess, you only analyze step-by-step."}, {"role": "user", "content": final_prompt}], 
+            messages=[{"role": "system", "content": system_role}, {"role": "user", "content": final_prompt}], 
             max_tokens=2500
         )
         content = response.choices[0].message.content.replace('```html', '').replace('```', '')
         
-        total_input = response.usage.prompt_tokens + kw_res.usage.prompt_tokens
-        total_output = response.usage.completion_tokens + kw_res.usage.completion_tokens
+        total_input = response.usage.prompt_tokens + kw_tokens
+        total_output = response.usage.completion_tokens
         
         return {"status": "success", "answer": content, "tokens": {"input": total_input, "output": total_output}}
     except Exception as e: return {"status": "error", "message": str(e)}
@@ -223,22 +237,25 @@ Generate ONLY valid HTML (replace bracket placeholders with actual data):
 @app.post("/chat")
 def chat_api(req: ChatRequest):
     try:
-        kw_prompt = f"Extract ONLY the main nouns, specific codes, or technical terms from this user query: '{req.message}'. DO NOT add any extra words. If none, output nothing."
-        kw_response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": kw_prompt}], max_tokens=30)
-        exact_keywords = kw_response.choices[0].message.content.strip()
-
-        context = get_context_from_db(req.message, exact_keywords, req.category, top_k=20)
-        
-        gemini_prompt = f"""คุณคือ AI ติวเตอร์และผู้เชี่ยวชาญด้านการบิน (ATC) ของไทย
+        if req.category == "ENG":
+            context = "นี่คือการสนทนาวิชาภาษาอังกฤษทั่วไป"
+            persona = "คุณคืออาจารย์สอนภาษาอังกฤษ (English Tutor) ตอบคำถามเรื่องไวยากรณ์และ TOEIC"
+        else:
+            kw_prompt = f"Extract ONLY the main nouns, specific codes, or technical terms from this user query: '{req.message}'. DO NOT add any extra words. If none, output nothing."
+            kw_response = client.chat.completions.create(model="gpt-4o-mini", messages=[{"role": "user", "content": kw_prompt}], max_tokens=30)
+            exact_keywords = kw_response.choices[0].message.content.strip()
+            context = get_context_from_db(req.message, exact_keywords, req.category, top_k=20)
+            persona = "คุณคือ AI ติวเตอร์และผู้เชี่ยวชาญด้านการบิน (ATC) ของไทย"
+            
+        gemini_prompt = f"""{persona}
 [ข้อมูลอ้างอิงจากฐานข้อมูลของคุณ]:\n{context}\n
 กฎกติกา:
 1. อ่านและทำความเข้าใจคำถามจากผู้ใช้ให้ดี 
 2. ใช้ข้อมูลอ้างอิงด้านบนประกอบการตอบ หากคำถามคือการถามหารหัส ให้ดูข้อมูลจากอ้างอิงเป็นหลัก
-3. ถ้าข้อมูลในอ้างอิงไม่ชัดเจน คุณสามารถใช้ความรู้สากลของคุณ (AIP, ICAO) ในการอธิบายเพิ่มเติมได้เลย
+3. ถ้าข้อมูลในอ้างอิงไม่ชัดเจน คุณสามารถใช้ความรู้สากลของคุณ ในการอธิบายเพิ่มเติมได้เลย
 
 คำถามของผู้ใช้: {req.message}
 """
-        # 🌟 เรียกใช้ Google Gemini ด้วย SDK รุ่นใหม่ล่าสุด
         gemini_client = genai.Client(api_key=GOOGLE_API_KEY)
         
         response = gemini_client.models.generate_content(
